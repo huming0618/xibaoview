@@ -11,7 +11,8 @@
     "build:data": "node scripts/build-data.mjs",
     "build:android": "VITE_BASE=./ vite build && npx cap sync android",
     "cap:sync": "npx cap sync android",
-    "cap:open": "npx cap open android"
+    "cap:open": "npx cap open android",
+    "seed-offline-tiles": "node scripts/download-offline-tiles.js"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.2",

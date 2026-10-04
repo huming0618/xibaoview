@@ -1,0 +1,89 @@
+{
+  "generatedAt": "2026-10-04T02:40:19.935Z",
+  "zoom": {
+    "min": 6,
+    "max": 13
+  },
+  "seedBbox": [
+    34.09,
+    107.07,
+    34.53,
+    109.09
+  ],
+  "note": "Xi-Bao passenger corridor 宝鸡南–西安北 (z6–z13). Seeded from Carto dark_all with OSM mirrors fallback. Esri is not used. Runtime: bundled → Carto → OSM.",
+  "perZoom": {
+    "6": {
+      "x0": 51,
+      "x1": 51,
+      "y0": 25,
+      "y1": 25,
+      "count": 1
+    },
+    "7": {
+      "x0": 102,
+      "x1": 102,
+      "y0": 50,
+      "y1": 51,
+      "count": 2
+    },
+    "8": {
+      "x0": 204,
+      "x1": 205,
+      "y0": 101,
+      "y1": 102,
+      "count": 4
+    },
+    "9": {
+      "x0": 408,
+      "x1": 411,
+      "y0": 203,
+      "y1": 204,
+      "count": 8
+    },
+    "10": {
+      "x0": 816,
+      "x1": 822,
+      "y0": 407,
+      "y1": 408,
+      "count": 14
+    },
+    "11": {
+      "x0": 1633,
+      "x1": 1644,
+      "y0": 814,
+      "y1": 817,
+      "count": 48
+    },
+    "12": {
+      "x0": 3266,
+      "x1": 3289,
+      "y0": 1628,
+      "y1": 1634,
+      "count": 168
+    },
+    "13": {
+      "x0": 6532,
+      "x1": 6578,
+      "y0": 3257,
+      "y1": 3269,
+      "count": 611
+    }
+  },
+  "uniqueRequested": 856,
+  "downloadedOk": 856,
+  "failed": 0,
+  "skippedExisting": 0,
+  "providersUsed": {
+    "carto": 0,
+    "osmfr": 856,
+    "osmde": 0,
+    "osm": 0
+  },
+  "primaryProvider": "osmfr",
+  "uniqueHashesOnDisk": 856,
+  "attribution": "Basemap tiles © OpenStreetMap contributors / CARTO. Bundled for offline 西宝客专 demo only. Esri is not used.",
+  "pathTemplate": "offline-tiles/{z}/{x}/{y}.png",
+  "onDiskPngCount": 856,
+  "onDiskBytes": 13172006,
+  "onDiskMB": 12.56
+}

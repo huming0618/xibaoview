@@ -49,7 +49,15 @@ npm run build:android
 cd android && ./gradlew assembleDebug
 ```
 
-`build:android` 会执行 `VITE_BASE=./ vite build && npx cap sync android`。底图为在线 CARTO Dark，失败时回退 OSM（本应用未内置离线瓦片）。
+`build:android` 会执行 `VITE_BASE=./ vite build && npx cap sync android`。`public/offline-tiles` 随 Vite 复制进 `dist`，再由 `cap sync` 打进 APK，全线默认视野可离线使用。
+
+```bash
+npm run seed-offline-tiles   # 可选：重下沿线 Carto/OSM 瓦片（不用 Esri）
+```
+
+- 瓦片范围：西宝客专走廊 宝鸡南↔西安北，z6–z13（minZoom 6、全线适配约 8–9、选站 13）
+- 加载顺序：内置 offline-tiles → Cache API → 在线 Carto dark_all → OSM（缺瓦片时回退网络，不用 Esri）
+- 离线时 maxZoom 限制为已打包的 z13
 
 重新生成线路 / 海拔 / 河流数据（需要已有 OSM 缓存或自行准备 `XIBAO_OSM_RAW`）：
 
@@ -63,6 +71,6 @@ npm run build:data
 - 车站：OSM `railway=station` 节点（见上表）
 - 海拔：Open-Meteo Elevation API（SRTM 90 m），沿正线每 1 km 采样
 - 河流：OSM `waterway=river` 中文名
-- 底图：CARTO Dark，失败时回退 OSM.org。没有 Esri
+- 底图：打包的 Carto/OSM 瓦片（z6–z13），失败时回退在线 Carto 再 OSM。没有 Esri
 
 地图数据 © OpenStreetMap 贡献者，[ODbL](https://opendatacommons.org/licenses/odbl/)。
