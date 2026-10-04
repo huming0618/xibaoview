@@ -118,24 +118,36 @@ function objectUrlFromBlob(blob) {
   return URL.createObjectURL(blob)
 }
 
+/** Accept only PNG/JPEG bytes so SPA/index.html fallbacks are not treated as tiles. */
+async function blobLooksLikeTile(blob) {
+  if (!blob || blob.size < 50) return false
+  const type = String(blob.type || '')
+  if (type && !type.startsWith('image/')) return false
+  try {
+    const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+    const isPng = head[0] === 0x89 && head[1] === 0x50
+    const isJpeg = head[0] === 0xff && head[1] === 0xd8
+    return isPng || isJpeg
+  } catch {
+    return type.startsWith('image/')
+  }
+}
+
 /** Try loading a bundled tile; returns { blob, bundledUrl } or null. Retries once on transient fail. */
 async function tryBundled(z, x, y, { retries = 1 } = {}) {
   const url = bundledTileUrl(z, x, y)
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(url, { cache: 'force-cache' })
+      const res = await fetch(url, { cache: attempt === 0 ? 'force-cache' : 'default' })
       if (!res.ok) {
-        if (attempt < retries) {
-          const res2 = await fetch(url, { cache: 'default' })
-          if (!res2.ok) continue
-          const blob2 = await res2.blob()
-          if (blob2 && blob2.size >= 50) return { blob: blob2, bundledUrl: url }
-          continue
-        }
+        if (attempt < retries) continue
         return null
       }
       const blob = await res.blob()
-      if (!blob || blob.size < 50) return null
+      if (!(await blobLooksLikeTile(blob))) {
+        if (attempt < retries) continue
+        return null
+      }
       return { blob, bundledUrl: url }
     } catch {
       if (attempt < retries) {
@@ -258,7 +270,7 @@ export function createCachedTileLayer(L, options = {}) {
           const hit = await matchCacheAnyKey(cache, [url, ...networkTileUrls(z, x, y)])
           if (hit) {
             const blob = await hit.blob()
-            if (blob && blob.size >= 50) {
+            if (await blobLooksLikeTile(blob)) {
               finishOk(blob, 'fromCache')
               return
             }
@@ -296,7 +308,7 @@ export function createCachedTileLayer(L, options = {}) {
           const hit = await matchCacheAnyKey(cache, [url, ...networkTileUrls(z, x, y)])
           if (hit) {
             const blob = await hit.blob()
-            if (blob && blob.size >= 50) {
+            if (await blobLooksLikeTile(blob)) {
               finishOk(blob, 'fromCache')
               return
             }
