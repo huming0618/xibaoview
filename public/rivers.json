@@ -1,0 +1,61 @@
+{
+  "source": "OpenStreetMap waterway=river, projected onto 西宝客专 polyline chainage",
+  "generated": "2026-10-04T02:07:12.143Z",
+  "notes": {
+    "kmSystem": "Same polyline chainage as the station scale; 宝鸡南 = 0",
+    "stationSnap": "A river named against a station sits on that station km (within 2 km)"
+  },
+  "summary": {
+    "totalKm": 162.5,
+    "riverCount": 11,
+    "uniqueRivers": 10
+  },
+  "rivers": [
+    {
+      "name": "清水河",
+      "km": 2.7
+    },
+    {
+      "name": "马尾河",
+      "km": 7.2
+    },
+    {
+      "name": "磻溪河",
+      "km": 15.1
+    },
+    {
+      "name": "伐鱼河",
+      "km": 21.3
+    },
+    {
+      "name": "麦李河",
+      "km": 36.3,
+      "desc": "岐山站",
+      "alignedTo": "岐山"
+    },
+    {
+      "name": "石头河",
+      "km": 39.7
+    },
+    {
+      "name": "甘泉河",
+      "km": 50.4
+    },
+    {
+      "name": "渭河 (1)",
+      "km": 54.2
+    },
+    {
+      "name": "漆水河",
+      "km": 80.4
+    },
+    {
+      "name": "渭河 (2)",
+      "km": 144.9
+    },
+    {
+      "name": "沣河",
+      "km": 147.7
+    }
+  ]
+}
