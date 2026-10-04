@@ -8,6 +8,8 @@ export interface LocatePosition {
   lat: number
   lng: number
   accuracy: number
+  /** GPS coords.speed in m/s, or null if the fix has no speed yet. */
+  speedMps: number | null
 }
 
 export interface LocateController {
@@ -66,6 +68,7 @@ export function createLocateControl(
   let programmaticMove = false
   let lastLatLng: L.LatLng | null = null
   let lastAccuracy = 0
+  let lastSpeedMps: number | null = null
   let locateTimeoutId: ReturnType<typeof setTimeout> | null = null
   let abortLocating = false
   let pollIntervalId: ReturnType<typeof setInterval> | null = null
@@ -88,6 +91,7 @@ export function createLocateControl(
       lat: lastLatLng.lat,
       lng: lastLatLng.lng,
       accuracy: lastAccuracy,
+      speedMps: lastSpeedMps,
     })
   }
 
@@ -118,10 +122,16 @@ export function createLocateControl(
     }
   }
 
-  function updateMarker(lat: number, lng: number, accuracy: number) {
+  function parseSpeedMps(speed: number | null | undefined): number | null {
+    if (speed == null || !Number.isFinite(speed) || speed < 0) return null
+    return speed
+  }
+
+  function updateMarker(lat: number, lng: number, accuracy: number, speed?: number | null) {
     const latlng = L.latLng(lat, lng)
     lastLatLng = latlng
     lastAccuracy = accuracy
+    lastSpeedMps = parseSpeedMps(speed)
     if (!marker) {
       marker = L.marker(latlng, { icon: userIcon, zIndexOffset: 1000, interactive: false }).addTo(map)
     } else {
@@ -154,13 +164,13 @@ export function createLocateControl(
     })
   }
 
-  function onInitialPosition(lat: number, lng: number, accuracy: number) {
+  function onInitialPosition(lat: number, lng: number, accuracy: number, speed?: number | null) {
     clearLocateTimeout()
     if (abortLocating || state !== 'locating') {
       console.log('[Locate] Position received but locate was cancelled')
       return
     }
-    updateMarker(lat, lng, accuracy)
+    updateMarker(lat, lng, accuracy, speed)
     follow = true
     setState('following')
     centerOnUser()
@@ -168,8 +178,8 @@ export function createLocateControl(
     startPolling()
   }
 
-  function onWatchPosition(lat: number, lng: number, accuracy: number) {
-    updateMarker(lat, lng, accuracy)
+  function onWatchPosition(lat: number, lng: number, accuracy: number, speed?: number | null) {
+    updateMarker(lat, lng, accuracy, speed)
     
     if (follow && state === 'following') {
       programmaticMove = true
@@ -190,7 +200,12 @@ export function createLocateControl(
     }
   }
 
-  async function getInitialPosition(): Promise<{ lat: number; lng: number; accuracy: number } | null> {
+  async function getInitialPosition(): Promise<{
+    lat: number
+    lng: number
+    accuracy: number
+    speedMps: number | null
+  } | null> {
     if (Capacitor.isNativePlatform()) {
       try {
         const pos = await Geolocation.getCurrentPosition({
@@ -202,6 +217,7 @@ export function createLocateControl(
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
           accuracy: pos.coords.accuracy ?? 0,
+          speedMps: parseSpeedMps(pos.coords.speed),
         }
       } catch (e) {
         console.log('[Locate] Low-accuracy getCurrentPosition failed, trying high accuracy:', e)
@@ -216,6 +232,7 @@ export function createLocateControl(
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
           accuracy: pos.coords.accuracy ?? 0,
+          speedMps: parseSpeedMps(pos.coords.speed),
         }
       } catch (e) {
         console.error('[Locate] High-accuracy getCurrentPosition also failed:', e)
@@ -228,6 +245,7 @@ export function createLocateControl(
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
             accuracy: pos.coords.accuracy ?? 0,
+            speedMps: parseSpeedMps(pos.coords.speed),
           }),
           (err) => reject(err),
           { enableHighAccuracy: false, timeout: 8000, maximumAge: 0 }
@@ -253,7 +271,8 @@ export function createLocateControl(
             onWatchPosition(
               position.coords.latitude,
               position.coords.longitude,
-              position.coords.accuracy ?? 0
+              position.coords.accuracy ?? 0,
+              position.coords.speed
             )
           }
         ).then((id) => {
@@ -269,7 +288,8 @@ export function createLocateControl(
             onWatchPosition(
               position.coords.latitude,
               position.coords.longitude,
-              position.coords.accuracy ?? 0
+              position.coords.accuracy ?? 0,
+              position.coords.speed
             )
           },
           (err) => console.warn('[Locate] Watch error:', err),
@@ -309,7 +329,7 @@ export function createLocateControl(
         maximumAge: 0,
       }).then((pos) => {
         console.log('[Locate] Poll GPS:', pos.coords.latitude.toFixed(5), pos.coords.longitude.toFixed(5))
-        onWatchPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0)
+        onWatchPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos.coords.speed)
       }).catch((e) => {
         console.warn('[Locate] Poll GPS error:', e)
         if (lastLatLng) emitPosition()
@@ -318,7 +338,7 @@ export function createLocateControl(
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           console.log('[Locate] Poll GPS:', pos.coords.latitude.toFixed(5), pos.coords.longitude.toFixed(5))
-          onWatchPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0)
+          onWatchPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0, pos.coords.speed)
         },
         (err) => {
           console.warn('[Locate] Poll GPS error:', err)
@@ -375,7 +395,7 @@ export function createLocateControl(
     try {
       const pos = await getInitialPosition()
       if (pos && !abortLocating) {
-        onInitialPosition(pos.lat, pos.lng, pos.accuracy)
+        onInitialPosition(pos.lat, pos.lng, pos.accuracy, pos.speedMps)
       }
     } catch (e) {
       if (!abortLocating) {
@@ -410,6 +430,7 @@ export function createLocateControl(
     }
     lastLatLng = null
     lastAccuracy = 0
+    lastSpeedMps = null
     emitPosition()
   }
 
@@ -472,7 +493,7 @@ export function createLocateControl(
     getState: () => state,
     getLastPosition: () =>
       lastLatLng
-        ? { lat: lastLatLng.lat, lng: lastLatLng.lng, accuracy: lastAccuracy }
+        ? { lat: lastLatLng.lat, lng: lastLatLng.lng, accuracy: lastAccuracy, speedMps: lastSpeedMps }
         : null,
     toggle,
     stop,

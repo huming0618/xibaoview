@@ -10,6 +10,14 @@ import {
 } from './tiles.ts'
 import { createLocateControl, type LocatePosition } from './locate.ts'
 import {
+  formatSpeedStatus,
+  getSpeedReading,
+  noteLocateSpeed,
+  startSpeedCheck,
+  stopSpeedCheck,
+  subscribeSpeedCheck,
+} from './speedCheck.ts'
+import {
   buildCorridor,
   buildSpine,
   projectOntoCorridor,
@@ -74,6 +82,7 @@ app.innerHTML = `
         <div class="location-status-content">
           <span id="location-status-coords" class="location-status-coords">未定位</span>
           <span id="location-status-corridor" class="location-status-corridor"></span>
+          <span id="location-status-speed" class="location-status-speed"></span>
         </div>
       </div>
     </header>
@@ -181,6 +190,7 @@ const stayView = createStayView(document.getElementById('stay-view')!)
 initStayLog()
 const locationStatusCoords = document.getElementById('location-status-coords')!
 const locationStatusCorridor = document.getElementById('location-status-corridor')!
+const locationStatusSpeed = document.getElementById('location-status-speed')!
 const locationStatusEl = document.getElementById('location-status')!
 
 function formatTime(): string {
@@ -188,13 +198,23 @@ function formatTime(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
 }
 
+function renderSpeedStatus(locateOn: boolean) {
+  locationStatusSpeed.textContent = formatSpeedStatus(getSpeedReading(), locateOn)
+}
+
 function updateLocationStatus(proj: LineProjection | null, pos: LocatePosition | null) {
   if (!pos) {
+    stopSpeedCheck()
     locationStatusCoords.textContent = '未定位'
     locationStatusCorridor.textContent = ''
+    renderSpeedStatus(false)
     locationStatusEl.classList.remove('has-location', 'off-corridor')
     return
   }
+
+  noteLocateSpeed(pos.speedMps)
+  startSpeedCheck()
+  renderSpeedStatus(true)
 
   const timestamp = formatTime()
   locationStatusCoords.textContent = `${pos.lat.toFixed(5)}°N, ${pos.lng.toFixed(5)}°E · ${timestamp}`
@@ -238,6 +258,10 @@ function applyLocationToViews(pos: LocatePosition | null) {
   stayView.refresh()
   updateLocationStatus(proj, pos)
 }
+
+subscribeSpeedCheck(() => {
+  renderSpeedStatus(locateCtrl?.getLastPosition() != null)
+})
 
 async function loadData() {
   try {
