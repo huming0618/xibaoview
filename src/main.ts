@@ -1,8 +1,22 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './style.css'
-import { createBaseTiles, resolveAssetUrl } from './tiles.ts'
+import {
+  createBaseTiles,
+  resolveAssetUrl,
+  syncOfflineZoomLimits,
+  warmCacheFromBundled,
+  isOnline,
+} from './tiles.ts'
 import { createLocateControl, type LocatePosition } from './locate.ts'
+import {
+  formatSpeedStatus,
+  getSpeedReading,
+  noteLocateSpeed,
+  startSpeedCheck,
+  stopSpeedCheck,
+  subscribeSpeedCheck,
+} from './speedCheck.ts'
 import {
   buildCorridor,
   buildSpine,
@@ -68,6 +82,7 @@ app.innerHTML = `
         <div class="location-status-content">
           <span id="location-status-coords" class="location-status-coords">未定位</span>
           <span id="location-status-corridor" class="location-status-corridor"></span>
+          <span id="location-status-speed" class="location-status-speed"></span>
         </div>
       </div>
     </header>
@@ -76,6 +91,7 @@ app.innerHTML = `
     <div id="elevation-view" class="elevation-view hidden" aria-label="西宝客专海拔剖面"></div>
     <div id="river-view" class="river-view hidden" aria-label="西宝客专沿线河流"></div>
     <div id="stay-view" class="stay-view hidden" aria-label="西宝客专停留记录"></div>
+    <div id="offline-banner" class="offline-banner hidden">离线模式 · 已加载沿线底图</div>
     <button id="locate-btn" class="locate-btn" title="定位 / 跟随我" type="button" aria-pressed="false">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <circle cx="12" cy="12" r="3"/>
@@ -109,7 +125,36 @@ L.control.attribution({
   '<a href="https://www.openstreetmap.org/copyright" target="_blank">© OSM</a> · CARTO'
 )
 
-createBaseTiles().addTo(map)
+const baseTiles = createBaseTiles()
+baseTiles.addTo(map)
+syncOfflineZoomLimits(map, baseTiles)
+
+const offlineBanner = document.getElementById('offline-banner')!
+function setOfflineBanner(show: boolean) {
+  offlineBanner.classList.toggle('hidden', !show)
+}
+
+let offlineTileWarned = false
+let tileMissCount = 0
+baseTiles.on('tileoffline', () => {
+  tileMissCount += 1
+  if (offlineTileWarned || tileMissCount < 3) return
+  offlineTileWarned = true
+  setOfflineBanner(true)
+})
+window.addEventListener('online', () => {
+  offlineTileWarned = false
+  tileMissCount = 0
+  setOfflineBanner(false)
+  syncOfflineZoomLimits(map, baseTiles)
+})
+window.addEventListener('offline', () => {
+  syncOfflineZoomLimits(map, baseTiles)
+  setOfflineBanner(true)
+})
+if (!isOnline()) setOfflineBanner(true)
+
+warmCacheFromBundled(undefined).catch(() => {})
 
 const lineStyle: L.PathOptions = {
   color: '#ffd700',
@@ -145,6 +190,7 @@ const stayView = createStayView(document.getElementById('stay-view')!)
 initStayLog()
 const locationStatusCoords = document.getElementById('location-status-coords')!
 const locationStatusCorridor = document.getElementById('location-status-corridor')!
+const locationStatusSpeed = document.getElementById('location-status-speed')!
 const locationStatusEl = document.getElementById('location-status')!
 
 function formatTime(): string {
@@ -152,13 +198,23 @@ function formatTime(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
 }
 
+function renderSpeedStatus(locateOn: boolean) {
+  locationStatusSpeed.textContent = formatSpeedStatus(getSpeedReading(), locateOn)
+}
+
 function updateLocationStatus(proj: LineProjection | null, pos: LocatePosition | null) {
   if (!pos) {
+    stopSpeedCheck()
     locationStatusCoords.textContent = '未定位'
     locationStatusCorridor.textContent = ''
+    renderSpeedStatus(false)
     locationStatusEl.classList.remove('has-location', 'off-corridor')
     return
   }
+
+  noteLocateSpeed(pos.speedMps)
+  startSpeedCheck()
+  renderSpeedStatus(true)
 
   const timestamp = formatTime()
   locationStatusCoords.textContent = `${pos.lat.toFixed(5)}°N, ${pos.lng.toFixed(5)}°E · ${timestamp}`
@@ -202,6 +258,10 @@ function applyLocationToViews(pos: LocatePosition | null) {
   stayView.refresh()
   updateLocationStatus(proj, pos)
 }
+
+subscribeSpeedCheck(() => {
+  renderSpeedStatus(locateCtrl?.getLastPosition() != null)
+})
 
 async function loadData() {
   try {
@@ -480,6 +540,18 @@ function setupControls() {
     label: locateLabel,
     toast: showToast,
     onPosition: applyLocationToViews,
+    onState: (s) => {
+      if (s === 'locating' && !locateCtrl?.getLastPosition()) {
+        locationStatusCoords.textContent = '定位中…'
+        locationStatusCorridor.textContent = '再点一次可取消'
+        locationStatusSpeed.textContent = ''
+        locationStatusEl.classList.remove('has-location', 'off-corridor')
+      } else if (s === 'idle' && !locateCtrl?.getLastPosition()) {
+        locationStatusCoords.textContent = '未定位'
+        locationStatusCorridor.textContent = ''
+        renderSpeedStatus(false)
+      }
+    },
   })
   locateBtn.addEventListener('click', () => {
     locateCtrl!.toggle().catch((e) => {
