@@ -20,7 +20,20 @@ export interface LocateController {
   destroy: () => void
 }
 
-const LOCATE_TIMEOUT_MS = 12000
+export const LOCATE_TIMEOUT_MS = 12000
+
+class LocateTimeoutError extends Error {
+  constructor() {
+    super('locate-timeout')
+    this.name = 'LocateTimeoutError'
+  }
+}
+
+function sleepReject(ms: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new LocateTimeoutError()), ms)
+  })
+}
 
 function isPermissionGranted(status: PermissionStatus): boolean {
   return status.location === 'granted' || status.coarseLocation === 'granted'
@@ -58,6 +71,7 @@ export function createLocateControl(
     label: HTMLElement
     toast: (msg: string) => void
     onPosition?: (pos: LocatePosition | null) => void
+    onState?: (state: LocateState) => void
   }
 ): LocateController {
   let state: LocateState = 'idle'
@@ -113,6 +127,7 @@ export function createLocateControl(
       opts.label.textContent = '跟随我'
       opts.button.title = '点击跟随我的位置'
     }
+    opts.onState?.(next)
   }
 
   function clearLocateTimeout() {
@@ -191,8 +206,9 @@ export function createLocateControl(
   }
 
   function onError(err: GeolocationPositionError | Error | null, isTimeout = false) {
+    const timedOut = isTimeout || (err instanceof LocateTimeoutError)
     clearLocateTimeout()
-    const msg = isTimeout ? '定位超时，请检查系统定位是否开启' : permissionDeniedMessage(err)
+    const msg = timedOut ? '定位超时，请检查系统定位是否开启' : permissionDeniedMessage(err)
     opts.toast(msg)
     if (state === 'locating') {
       stopWatch()
@@ -200,58 +216,52 @@ export function createLocateControl(
     }
   }
 
-  async function getInitialPosition(): Promise<{
+  function readCoords(pos: { coords: GeolocationCoordinates } | { coords: { latitude: number; longitude: number; accuracy?: number | null; speed?: number | null } }) {
+    return {
+      lat: pos.coords.latitude,
+      lng: pos.coords.longitude,
+      accuracy: pos.coords.accuracy ?? 0,
+      speedMps: parseSpeedMps(pos.coords.speed),
+    }
+  }
+
+  /**
+   * One getCurrentPosition, raced against a client timer.
+   * Capacitor Android often ignores the plugin `timeout` and never calls back
+   * from watchPosition; do not chain a second getCurrentPosition that can hang.
+   */
+  async function getInitialPosition(timeoutMs: number): Promise<{
     lat: number
     lng: number
     accuracy: number
     speedMps: number | null
   } | null> {
+    const budget = Math.max(400, timeoutMs)
     if (Capacitor.isNativePlatform()) {
-      try {
-        const pos = await Geolocation.getCurrentPosition({
-          enableHighAccuracy: false,
-          timeout: 8000,
-          maximumAge: 0,
-        })
-        return {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy ?? 0,
-          speedMps: parseSpeedMps(pos.coords.speed),
-        }
-      } catch (e) {
-        console.log('[Locate] Low-accuracy getCurrentPosition failed, trying high accuracy:', e)
-      }
-      try {
-        const pos = await Geolocation.getCurrentPosition({
+      const pos = await Promise.race([
+        Geolocation.getCurrentPosition({
           enableHighAccuracy: true,
-          timeout: 10000,
+          timeout: budget,
           maximumAge: 0,
-        })
-        return {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy ?? 0,
-          speedMps: parseSpeedMps(pos.coords.speed),
-        }
-      } catch (e) {
-        console.error('[Locate] High-accuracy getCurrentPosition also failed:', e)
-        throw e
-      }
-    } else {
-      return new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accuracy: pos.coords.accuracy ?? 0,
-            speedMps: parseSpeedMps(pos.coords.speed),
-          }),
-          (err) => reject(err),
-          { enableHighAccuracy: false, timeout: 8000, maximumAge: 0 }
-        )
-      })
+        }),
+        sleepReject(budget),
+      ])
+      return readCoords(pos)
     }
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new LocateTimeoutError()), budget)
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          clearTimeout(t)
+          resolve(readCoords(pos))
+        },
+        (err) => {
+          clearTimeout(t)
+          reject(err)
+        },
+        { enableHighAccuracy: true, timeout: budget, maximumAge: 0 }
+      )
+    })
   }
 
   function startWatchForFollow() {
@@ -261,7 +271,7 @@ export function createLocateControl(
     try {
       if (Capacitor.isNativePlatform()) {
         Geolocation.watchPosition(
-          { enableHighAccuracy: true, timeout: 30000, minimumUpdateInterval: 1000 },
+          { enableHighAccuracy: true, timeout: 30000, maximumAge: 0, minimumUpdateInterval: 1000 },
           (position, err) => {
             if (err || !position) {
               console.warn('[Locate] Watch error:', err)
@@ -385,6 +395,7 @@ export function createLocateControl(
       return
     }
 
+    const startedAt = Date.now()
     locateTimeoutId = setTimeout(() => {
       if (state === 'locating') {
         console.warn('[Locate] Client-side timeout reached')
@@ -393,12 +404,13 @@ export function createLocateControl(
     }, LOCATE_TIMEOUT_MS)
 
     try {
-      const pos = await getInitialPosition()
-      if (pos && !abortLocating) {
+      const remaining = Math.max(400, LOCATE_TIMEOUT_MS - (Date.now() - startedAt))
+      const pos = await getInitialPosition(remaining)
+      if (pos && !abortLocating && state === 'locating') {
         onInitialPosition(pos.lat, pos.lng, pos.accuracy, pos.speedMps)
       }
     } catch (e) {
-      if (!abortLocating) {
+      if (!abortLocating && state === 'locating') {
         console.error('[Locate] getInitialPosition failed:', e)
         onError(e instanceof Error ? e : null)
       }

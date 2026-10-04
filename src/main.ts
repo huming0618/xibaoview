@@ -540,6 +540,18 @@ function setupControls() {
     label: locateLabel,
     toast: showToast,
     onPosition: applyLocationToViews,
+    onState: (s) => {
+      if (s === 'locating' && !locateCtrl?.getLastPosition()) {
+        locationStatusCoords.textContent = '定位中…'
+        locationStatusCorridor.textContent = '再点一次可取消'
+        locationStatusSpeed.textContent = ''
+        locationStatusEl.classList.remove('has-location', 'off-corridor')
+      } else if (s === 'idle' && !locateCtrl?.getLastPosition()) {
+        locationStatusCoords.textContent = '未定位'
+        locationStatusCorridor.textContent = ''
+        renderSpeedStatus(false)
+      }
+    },
   })
   locateBtn.addEventListener('click', () => {
     locateCtrl!.toggle().catch((e) => {
