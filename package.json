@@ -2,19 +2,26 @@
   "name": "xibaoview",
   "private": true,
   "version": "1.0.0",
-  "description": "西宝客专沿线地图 — 宝鸡南至西安北",
+  "description": "西宝客专沿线地图 — 宝鸡南至西安北（Leaflet + Capacitor Android）",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "build:data": "node scripts/build-data.mjs"
+    "build:data": "node scripts/build-data.mjs",
+    "build:android": "VITE_BASE=./ vite build && npx cap sync android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/core": "^6.2.2",
+    "@capacitor/geolocation": "^6.1.1",
     "@types/leaflet": "^1.9.22",
     "leaflet": "^1.9.4"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.2.2",
     "typescript": "~5.7.0",
     "vite": "^6.0.0"
   }

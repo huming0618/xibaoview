@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">西宝客专</string>
+    <string name="title_activity_main">西宝客专</string>
+    <string name="package_name">com.huming.xibaoview</string>
+    <string name="custom_url_scheme">com.huming.xibaoview</string>
+</resources>

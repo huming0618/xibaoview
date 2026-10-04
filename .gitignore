@@ -12,3 +12,14 @@ dist-ssr
 .env
 .env.*
 agent-tools/
+
+# Android build artifacts (source under android/ is committed)
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/.idea/
+android/capacitor-cordova-android-plugins/build/
+*.apk
+*.aab
+*.keystore

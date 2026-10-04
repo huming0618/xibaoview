@@ -1,4 +1,6 @@
 import L from 'leaflet'
+import { Capacitor } from '@capacitor/core'
+import { Geolocation, type PermissionStatus } from '@capacitor/geolocation'
 
 export type LocateState = 'idle' | 'locating' | 'following' | 'located'
 
@@ -17,7 +19,27 @@ export interface LocateController {
 }
 
 const LOCATE_TIMEOUT_MS = 12000
-const POLL_INTERVAL_MS = 2500
+
+function isPermissionGranted(status: PermissionStatus): boolean {
+  return status.location === 'granted' || status.coarseLocation === 'granted'
+}
+
+async function ensurePermission(): Promise<boolean> {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      let status = await Geolocation.checkPermissions()
+      if (!isPermissionGranted(status)) {
+        status = await Geolocation.requestPermissions()
+      }
+      return isPermissionGranted(status)
+    }
+    if (!('geolocation' in navigator)) return false
+    return true
+  } catch (e) {
+    console.error('[Locate] Permission check/request failed:', e)
+    throw e
+  }
+}
 
 function permissionDeniedMessage(err?: GeolocationPositionError | Error | null): string {
   if (err && 'code' in err && err.code === 1) return '请允许位置权限后重试'
@@ -37,7 +59,7 @@ export function createLocateControl(
   }
 ): LocateController {
   let state: LocateState = 'idle'
-  let watchId: number | null = null
+  let watchId: string | number | null = null
   let marker: L.Marker | null = null
   let accuracyCircle: L.Circle | null = null
   let follow = false
@@ -47,6 +69,7 @@ export function createLocateControl(
   let locateTimeoutId: ReturnType<typeof setTimeout> | null = null
   let abortLocating = false
   let pollIntervalId: ReturnType<typeof setInterval> | null = null
+  const POLL_INTERVAL_MS = 2500
 
   const userIcon = L.divIcon({
     className: 'user-location-marker',
@@ -133,7 +156,10 @@ export function createLocateControl(
 
   function onInitialPosition(lat: number, lng: number, accuracy: number) {
     clearLocateTimeout()
-    if (abortLocating || state !== 'locating') return
+    if (abortLocating || state !== 'locating') {
+      console.log('[Locate] Position received but locate was cancelled')
+      return
+    }
     updateMarker(lat, lng, accuracy)
     follow = true
     setState('following')
@@ -144,6 +170,7 @@ export function createLocateControl(
 
   function onWatchPosition(lat: number, lng: number, accuracy: number) {
     updateMarker(lat, lng, accuracy)
+    
     if (follow && state === 'following') {
       programmaticMove = true
       map.panTo(lastLatLng!, { animate: true })
@@ -163,65 +190,151 @@ export function createLocateControl(
     }
   }
 
-  function getInitialPosition(): Promise<{ lat: number; lng: number; accuracy: number }> {
-    return new Promise((resolve, reject) => {
-      if (!('geolocation' in navigator)) {
-        reject(new Error('geolocation unavailable'))
-        return
+  async function getInitialPosition(): Promise<{ lat: number; lng: number; accuracy: number } | null> {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const pos = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: false,
+          timeout: 8000,
+          maximumAge: 0,
+        })
+        return {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? 0,
+        }
+      } catch (e) {
+        console.log('[Locate] Low-accuracy getCurrentPosition failed, trying high accuracy:', e)
       }
-      navigator.geolocation.getCurrentPosition(
-        (pos) =>
-          resolve({
+      try {
+        const pos = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        })
+        return {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? 0,
+        }
+      } catch (e) {
+        console.error('[Locate] High-accuracy getCurrentPosition also failed:', e)
+        throw e
+      }
+    } else {
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
             accuracy: pos.coords.accuracy ?? 0,
           }),
-        (err) => reject(err),
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 0 }
-      )
-    })
+          (err) => reject(err),
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 0 }
+        )
+      })
+    }
   }
 
   function startWatchForFollow() {
-    if (watchId !== null || !('geolocation' in navigator)) return
-    watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        onWatchPosition(
-          position.coords.latitude,
-          position.coords.longitude,
-          position.coords.accuracy ?? 0
+    if (watchId !== null) return
+    
+    console.log('[Locate] Starting watch for continuous updates')
+    try {
+      if (Capacitor.isNativePlatform()) {
+        Geolocation.watchPosition(
+          { enableHighAccuracy: true, timeout: 30000, minimumUpdateInterval: 1000 },
+          (position, err) => {
+            if (err || !position) {
+              console.warn('[Locate] Watch error:', err)
+              return
+            }
+            console.log('[Locate] Watch update:', position.coords.latitude, position.coords.longitude)
+            onWatchPosition(
+              position.coords.latitude,
+              position.coords.longitude,
+              position.coords.accuracy ?? 0
+            )
+          }
+        ).then((id) => {
+          watchId = id
+          console.log('[Locate] Watch started with id:', id)
+        }).catch((e) => {
+          console.warn('[Locate] Failed to start watch:', e)
+        })
+      } else {
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            console.log('[Locate] Watch update:', position.coords.latitude, position.coords.longitude)
+            onWatchPosition(
+              position.coords.latitude,
+              position.coords.longitude,
+              position.coords.accuracy ?? 0
+            )
+          },
+          (err) => console.warn('[Locate] Watch error:', err),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }
         )
-      },
-      (err) => console.warn('[Locate] Watch error:', err),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }
-    )
+        console.log('[Locate] Browser watch started with id:', watchId)
+      }
+    } catch (e) {
+      console.warn('[Locate] startWatchForFollow failed:', e)
+    }
   }
 
   function stopPolling() {
     if (pollIntervalId !== null) {
       clearInterval(pollIntervalId)
       pollIntervalId = null
+      console.log('[Locate] Polling stopped')
     }
   }
 
   function doPollTick() {
-    if (lastLatLng) emitPosition()
-    if (state !== 'following' && state !== 'located') return
-    if (!('geolocation' in navigator)) return
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
+    console.log('[Locate] Poll tick, state:', state)
+    
+    if (lastLatLng) {
+      emitPosition()
+    }
+    
+    if (state !== 'following' && state !== 'located') {
+      console.log('[Locate] Poll: not in active state, skipping GPS fetch')
+      return
+    }
+    
+    if (Capacitor.isNativePlatform()) {
+      Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 2000,
+        maximumAge: 0,
+      }).then((pos) => {
+        console.log('[Locate] Poll GPS:', pos.coords.latitude.toFixed(5), pos.coords.longitude.toFixed(5))
         onWatchPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0)
-      },
-      (err) => {
-        console.warn('[Locate] Poll GPS error:', err)
+      }).catch((e) => {
+        console.warn('[Locate] Poll GPS error:', e)
         if (lastLatLng) emitPosition()
-      },
-      { enableHighAccuracy: true, timeout: 2000, maximumAge: 0 }
-    )
+      })
+    } else {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          console.log('[Locate] Poll GPS:', pos.coords.latitude.toFixed(5), pos.coords.longitude.toFixed(5))
+          onWatchPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 0)
+        },
+        (err) => {
+          console.warn('[Locate] Poll GPS error:', err)
+          if (lastLatLng) emitPosition()
+        },
+        { enableHighAccuracy: true, timeout: 2000, maximumAge: 0 }
+      )
+    }
   }
 
   function startPolling() {
-    if (pollIntervalId !== null) return
+    if (pollIntervalId !== null) {
+      console.log('[Locate] Polling already running')
+      return
+    }
+    console.log('[Locate] Starting position polling every', POLL_INTERVAL_MS, 'ms')
     doPollTick()
     pollIntervalId = setInterval(doPollTick, POLL_INTERVAL_MS)
   }
@@ -229,27 +342,46 @@ export function createLocateControl(
   async function startLocate() {
     abortLocating = false
     setState('locating')
-
-    if (!('geolocation' in navigator)) {
-      opts.toast('定位服务不可用')
+    
+    let ok = false
+    try {
+      ok = await ensurePermission()
+    } catch (e) {
+      console.error('[Locate] ensurePermission failed:', e)
+      opts.toast('定位权限检查失败')
+      setState('idle')
+      return
+    }
+    
+    if (!ok) {
+      opts.toast('请允许位置权限后重试')
       setState('idle')
       return
     }
 
     if (abortLocating) {
+      console.log('[Locate] Locate aborted after permission check')
       setState('idle')
       return
     }
 
     locateTimeoutId = setTimeout(() => {
-      if (state === 'locating') onError(null, true)
+      if (state === 'locating') {
+        console.warn('[Locate] Client-side timeout reached')
+        onError(null, true)
+      }
     }, LOCATE_TIMEOUT_MS)
 
     try {
       const pos = await getInitialPosition()
-      if (pos && !abortLocating) onInitialPosition(pos.lat, pos.lng, pos.accuracy)
+      if (pos && !abortLocating) {
+        onInitialPosition(pos.lat, pos.lng, pos.accuracy)
+      }
     } catch (e) {
-      if (!abortLocating) onError(e instanceof Error ? e : null)
+      if (!abortLocating) {
+        console.error('[Locate] getInitialPosition failed:', e)
+        onError(e instanceof Error ? e : null)
+      }
     }
   }
 
@@ -257,7 +389,11 @@ export function createLocateControl(
     clearLocateTimeout()
     stopPolling()
     if (watchId != null) {
-      navigator.geolocation.clearWatch(watchId)
+      if (Capacitor.isNativePlatform() && typeof watchId === 'string') {
+        Geolocation.clearWatch({ id: watchId }).catch(() => {})
+      } else if (typeof watchId === 'number') {
+        navigator.geolocation.clearWatch(watchId)
+      }
       watchId = null
     }
     follow = false
@@ -278,6 +414,7 @@ export function createLocateControl(
   }
 
   function cancelLocate() {
+    console.log('[Locate] User cancelled locating')
     abortLocating = true
     clearLocateTimeout()
     stopWatch()
@@ -310,8 +447,11 @@ export function createLocateControl(
       follow = true
       setState('following')
       centerOnUser()
-      if (watchId === null) startWatchForFollow()
-    } catch {
+      if (watchId === null) {
+        startWatchForFollow()
+      }
+    } catch (e) {
+      console.error('[Locate] toggle error:', e)
       opts.toast('定位功能出错')
       setState('idle')
     }
@@ -325,12 +465,15 @@ export function createLocateControl(
     }
   }
   map.on('dragstart', onUserMove)
+
   setState('idle')
 
   return {
     getState: () => state,
     getLastPosition: () =>
-      lastLatLng ? { lat: lastLatLng.lat, lng: lastLatLng.lng, accuracy: lastAccuracy } : null,
+      lastLatLng
+        ? { lat: lastLatLng.lat, lng: lastLatLng.lng, accuracy: lastAccuracy }
+        : null,
     toggle,
     stop,
     destroy: () => {

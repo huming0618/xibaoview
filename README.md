@@ -39,6 +39,18 @@ npm run build
 npm run preview
 ```
 
+## Android APK
+
+Capacitor 6。App ID：`com.huming.xibaoview`，应用名：西宝客专。
+
+```bash
+npm install
+npm run build:android
+cd android && ./gradlew assembleDebug
+```
+
+`build:android` 会执行 `VITE_BASE=./ vite build && npx cap sync android`。底图为在线 CARTO Dark，失败时回退 OSM（本应用未内置离线瓦片）。
+
 重新生成线路 / 海拔 / 河流数据（需要已有 OSM 缓存或自行准备 `XIBAO_OSM_RAW`）：
 
 ```bash

@@ -1,0 +1,11 @@
+{
+  "appId": "com.huming.xibaoview",
+  "appName": "西宝客专",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
